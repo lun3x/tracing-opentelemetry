@@ -131,17 +131,17 @@ pub use span_ext::OpenTelemetrySpanExt;
 
 /// Per-span OpenTelemetry data tracked by this crate.
 #[derive(Debug)]
-pub(crate) struct OtelData {
+pub struct OtelData {
     /// The state of the OtelData, which can either be a builder or a context.
-    state: OtelDataState,
+    pub state: OtelDataState,
     /// The end time of the span if it has been exited.
-    end_time: Option<SystemTime>,
+    pub end_time: Option<SystemTime>,
 }
 
 /// The state of the OpenTelemetry data for a span.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum OtelDataState {
+pub enum OtelDataState {
     /// The span is being built, with a parent context and a builder.
     Builder {
         parent_cx: opentelemetry::Context,
