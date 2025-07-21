@@ -42,6 +42,7 @@ pub struct OpenTelemetryLayer<S, T> {
     tracked_inactivity: bool,
     with_threads: bool,
     with_level: bool,
+    with_target: bool,
     context_activation: bool,
     sem_conv_config: SemConvConfig,
     with_context: WithContext,
@@ -274,18 +275,17 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                     self.span_builder_updates
                         .get_or_insert_with(SpanBuilderUpdates::default)
                         .status
-                        .replace(otel::Status::error(format!("{:?}", value)));
+                        .replace(otel::Status::error(format!("{value:?}")));
                 }
                 if self.sem_conv_config.error_events_to_exceptions {
                     self.event_builder.name = EVENT_EXCEPTION_NAME.into();
-                    self.event_builder.attributes.push(KeyValue::new(
-                        FIELD_EXCEPTION_MESSAGE,
-                        format!("{:?}", value),
-                    ));
+                    self.event_builder
+                        .attributes
+                        .push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, format!("{value:?}")));
                 } else {
                     self.event_builder
                         .attributes
-                        .push(KeyValue::new("error", format!("{:?}", value)));
+                        .push(KeyValue::new("error", format!("{value:?}")));
                 }
             }
             // Skip fields that are actually log metadata that have already been handled
@@ -305,7 +305,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            "message" => self.event_builder.name = format!("{:?}", value).into(),
+            "message" => self.event_builder.name = format!("{value:?}").into(),
             // While tracing supports the error primitive, the instrumentation macro does not
             // use the primitive and instead uses the debug or display primitive.
             // In both cases, an event with an empty name and with an error attribute is created.
@@ -314,18 +314,17 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                     self.span_builder_updates
                         .get_or_insert_with(SpanBuilderUpdates::default)
                         .status
-                        .replace(otel::Status::error(format!("{:?}", value)));
+                        .replace(otel::Status::error(format!("{value:?}")));
                 }
                 if self.sem_conv_config.error_events_to_exceptions {
                     self.event_builder.name = EVENT_EXCEPTION_NAME.into();
-                    self.event_builder.attributes.push(KeyValue::new(
-                        FIELD_EXCEPTION_MESSAGE,
-                        format!("{:?}", value),
-                    ));
+                    self.event_builder
+                        .attributes
+                        .push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, format!("{value:?}")));
                 } else {
                     self.event_builder
                         .attributes
-                        .push(KeyValue::new("error", format!("{:?}", value)));
+                        .push(KeyValue::new("error", format!("{value:?}")));
                 }
             }
             // Skip fields that are actually log metadata that have already been handled
@@ -334,7 +333,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             name => {
                 self.event_builder
                     .attributes
-                    .push(KeyValue::new(name, format!("{:?}", value)));
+                    .push(KeyValue::new(name, format!("{value:?}")));
             }
         }
     }
@@ -503,19 +502,19 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            SPAN_NAME_FIELD => self.span_builder_updates.name = Some(format!("{:?}", value).into()),
+            SPAN_NAME_FIELD => self.span_builder_updates.name = Some(format!("{value:?}").into()),
             SPAN_KIND_FIELD => {
-                self.span_builder_updates.span_kind = str_to_span_kind(&format!("{:?}", value))
+                self.span_builder_updates.span_kind = str_to_span_kind(&format!("{value:?}"))
             }
             SPAN_STATUS_CODE_FIELD => {
-                self.span_builder_updates.status = Some(str_to_status(&format!("{:?}", value)))
+                self.span_builder_updates.status = Some(str_to_status(&format!("{value:?}")))
             }
             SPAN_STATUS_DESCRIPTION_FIELD => {
-                self.span_builder_updates.status = Some(otel::Status::error(format!("{:?}", value)))
+                self.span_builder_updates.status = Some(otel::Status::error(format!("{value:?}")))
             }
             _ => self.record(KeyValue::new(
                 Key::new(field.name()),
-                Value::String(format!("{:?}", value).into()),
+                Value::String(format!("{value:?}").into()),
             )),
         }
     }
@@ -615,6 +614,7 @@ where
             tracked_inactivity: true,
             with_threads: true,
             with_level: false,
+            with_target: true,
             context_activation: true,
             sem_conv_config: SemConvConfig {
                 error_fields_to_exceptions: true,
@@ -674,6 +674,7 @@ where
             tracked_inactivity: self.tracked_inactivity,
             with_threads: self.with_threads,
             with_level: self.with_level,
+            with_target: self.with_target,
             context_activation: self.context_activation,
             sem_conv_config: self.sem_conv_config,
             with_context: WithContext {
@@ -822,6 +823,16 @@ where
         }
     }
 
+    /// Sets whether or not span metadata should include an attribute with `target` from `tracing` spans.
+    ///
+    /// By default, the target attribute is enabled..
+    pub fn with_target(self, target: bool) -> Self {
+        Self {
+            with_target: target,
+            ..self
+        }
+    }
+
     /// Sets whether or not an OpenTelemetry Context should be activated on span entry.
     ///
     /// When enabled, entering a span will activate its OpenTelemetry context, making it
@@ -950,6 +961,9 @@ where
         if self.with_level {
             extra_attrs += 1;
         }
+        if self.with_target {
+            extra_attrs += 1;
+        }
         extra_attrs
     }
 
@@ -1057,6 +1071,9 @@ where
 
         if self.with_level {
             builder_attrs.push(KeyValue::new("level", attrs.metadata().level().as_str()));
+        }
+        if self.with_target {
+            builder_attrs.push(KeyValue::new("target", attrs.metadata().target()));
         }
 
         let mut updates = SpanBuilderUpdates::default();
@@ -1402,7 +1419,7 @@ impl Timings {
 }
 
 fn thread_id_integer(id: thread::ThreadId) -> u64 {
-    let thread_id = format!("{:?}", id);
+    let thread_id = format!("{id:?}");
     thread_id
         .trim_start_matches("ThreadId(")
         .trim_end_matches(')')
@@ -1974,6 +1991,36 @@ mod tests {
         let attributes = tracer.attributes();
 
         assert!(!attributes.contains_key("level"));
+    }
+
+    #[test]
+    fn includes_target() {
+        let mut tracer = TestTracer::default();
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().with_tracer(tracer.clone()).with_target(true));
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug_span!("request");
+        });
+
+        let attributes = tracer.attributes();
+        let keys = attributes.keys().map(|k| k.as_str()).collect::<Vec<&str>>();
+        assert!(keys.contains(&"target"));
+    }
+
+    #[test]
+    fn excludes_target() {
+        let mut tracer = TestTracer::default();
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().with_tracer(tracer.clone()).with_target(false));
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug_span!("request");
+        });
+
+        let attributes = tracer.attributes();
+        let keys = attributes.keys().map(|k| k.as_str()).collect::<Vec<&str>>();
+        assert!(!keys.contains(&"target"));
     }
 
     #[test]

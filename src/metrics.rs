@@ -188,9 +188,8 @@ impl Visit for MetricVisitor<'_> {
             } else {
                 eprintln!(
                     "[tracing-opentelemetry]: Received Counter metric, but \
-                    provided u64: {} is greater than i64::MAX. Ignoring \
-                    this metric.",
-                    value
+                    provided u64: {value} is greater than i64::MAX. Ignoring \
+                    this metric."
                 );
             }
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
@@ -283,6 +282,7 @@ impl Visit for MetricVisitor<'_> {
 ///   only ever increase
 /// - `counter.`: Used when the counter can go up or down
 /// - `histogram.`: Used to report arbitrary values that are likely to be statistically meaningful
+/// - `gauge.`: Used to report instantaneous values that can go up or down
 ///
 /// Examples:
 /// ```
@@ -297,6 +297,9 @@ impl Visit for MetricVisitor<'_> {
 /// info!(histogram.qux = 1);
 /// info!(histogram.abc = -1);
 /// info!(histogram.def = 1.1);
+///
+/// info!(gauge.foo = 1);
+/// info!(gauge.bar = 1.1);
 /// ```
 ///
 /// # Mixing data types
@@ -408,11 +411,8 @@ impl MetricsFilter {
                 if name.starts_with(METRIC_PREFIX_COUNTER)
                     || name.starts_with(METRIC_PREFIX_MONOTONIC_COUNTER)
                     || name.starts_with(METRIC_PREFIX_HISTOGRAM)
+                    || name.starts_with(METRIC_PREFIX_GAUGE)
                 {
-                    return true;
-                }
-
-                if name.starts_with(METRIC_PREFIX_GAUGE) {
                     return true;
                 }
 
