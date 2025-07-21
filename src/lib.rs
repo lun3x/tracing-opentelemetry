@@ -9,10 +9,6 @@
 //! [OpenTelemetry]: https://opentelemetry.io
 //! [`tracing`]: https://github.com/tokio-rs/tracing
 //!
-//! *Compiler support: [requires `rustc` 1.65+][msrv]*
-//!
-//! [msrv]: #supported-rust-versions
-//!
 //! ### Special Fields
 //!
 //! Fields with an `otel.` prefix are reserved for this crate and have specific
@@ -22,9 +18,12 @@
 //! * `otel.name`: Override the span name sent to OpenTelemetry exporters.
 //!   Setting this field is useful if you want to display non-static information
 //!   in your span name.
-//! * `otel.kind`: Set the span kind to one of the supported OpenTelemetry [span kinds].
+//! * `otel.kind`: Set the span kind to one of the supported OpenTelemetry [span kinds]. These must
+//!   be specified as strings such as `"client"` or `"server"`. If it is not specified, the span is
+//!   assumed to be internal.
 //! * `otel.status_code`: Set the span status code to one of the supported OpenTelemetry [span status codes].
-//! * `otel.status_message`: Set the span status message.
+//! * `otel.status_description`: Set the span description of the status. This should be used only if
+//!   `otel.status_code` is also set.
 //!
 //! [span kinds]: opentelemetry::trace::SpanKind
 //! [span status codes]: opentelemetry::trace::Status
@@ -33,7 +32,7 @@
 //!
 //! OpenTelemetry defines conventional names for attributes of common
 //! operations. These names can be assigned directly as fields, e.g.
-//! `trace_span!("request", "otel.kind" = %SpanKind::Client, "url.full" = ..)`, and they
+//! `trace_span!("request", "server.port" = 80, "url.full" = ..)`, and they
 //! will be passed through to your configured OpenTelemetry exporter. You can
 //! find the full list of the operations and their expected field names in the
 //! [semantic conventions] spec.
@@ -42,11 +41,19 @@
 //!
 //! ### Stability Status
 //!
-//! The OpenTelemetry specification is currently in beta so some breaking
-//! changes may still occur on the path to 1.0. You can follow the changes via
-//! the [spec repository] to track progress toward stabilization.
+//! The OpenTelemetry tracing specification is stable but the underlying [opentelemetry crate] is
+//! not so some breaking changes will still occur in this crate as well. Metrics are not yet fully
+//! stable. You can read the specification via the [spec repository].
 //!
+//! [opentelemetry crate]: https://github.com/open-telemetry/opentelemetry-rust
 //! [spec repository]: https://github.com/open-telemetry/opentelemetry-specification
+//!
+//! ### OpenTelemetry Logging
+//!
+//! Logging to OpenTelemetry collectors is not supported by this crate, only traces and metrics are.
+//! If you need to export logs through OpenTelemetry, consider [`opentelemetry-appender-tracing`].
+//!
+//! [`opentelemetry-appender-tracing`]: https://crates.io/crates/opentelemetry-appender-tracing
 //!
 //! ## Examples
 //!
@@ -88,27 +95,9 @@
 //!   default*.
 //!
 //! [layer]: tracing_subscriber::layer
-//!
-//! ## Supported Rust Versions
-//!
-//! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.60. The current Tracing version is not guaranteed to build on
-//! Rust versions earlier than the minimum supported version.
-//!
-//! Tracing follows the same compiler support policies as the rest of the Tokio
-//! project. The current stable Rust compiler and the three most recent minor
-//! versions before it will always be supported. For example, if the current
-//! stable compiler version is 1.45, the minimum supported version will not be
-//! increased past 1.42, three minor versions prior. Increasing the minimum
-//! supported compiler version is not considered a semver breaking change as
-//! long as doing so complies with this policy.
-//!
-//! [subscriber]: tracing_subscriber::subscribe
 #![warn(unreachable_pub)]
-#![doc(html_root_url = "https://docs.rs/tracing-opentelemetry/0.22.0")]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/master/assets/logo-type.png",
-    issue_tracker_base_url = "https://github.com/tokio-rs/tracing-opentelemetry/issues/"
+    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/master/assets/logo-type.png"
 )]
 #![cfg_attr(
     docsrs,

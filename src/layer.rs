@@ -1,5 +1,4 @@
 use crate::{OtelData, PreSampledTracer};
-use once_cell::unsync;
 use opentelemetry::{
     trace::{self as otel, noop, SpanBuilder, SpanKind, Status, TraceContextExt},
     Context as OtelContext, Key, KeyValue, StringValue, Value,
@@ -23,7 +22,7 @@ use web_time::Instant;
 const SPAN_NAME_FIELD: &str = "otel.name";
 const SPAN_KIND_FIELD: &str = "otel.kind";
 const SPAN_STATUS_CODE_FIELD: &str = "otel.status_code";
-const SPAN_STATUS_MESSAGE_FIELD: &str = "otel.status_message";
+const SPAN_STATUS_DESCRIPTION_FIELD: &str = "otel.status_description";
 
 const EVENT_EXCEPTION_NAME: &str = "exception";
 const FIELD_EXCEPTION_MESSAGE: &str = "exception.message";
@@ -40,6 +39,7 @@ pub struct OpenTelemetryLayer<S, T> {
     tracked_inactivity: bool,
     with_threads: bool,
     with_level: bool,
+    with_target: bool,
     sem_conv_config: SemConvConfig,
     get_context: WithContext,
     _registry: marker::PhantomData<S>,
@@ -226,18 +226,17 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                     self.span_builder_updates
                         .get_or_insert_with(SpanBuilderUpdates::default)
                         .status
-                        .replace(otel::Status::error(format!("{:?}", value)));
+                        .replace(otel::Status::error(format!("{value:?}")));
                 }
                 if self.sem_conv_config.error_events_to_exceptions {
                     self.event_builder.name = EVENT_EXCEPTION_NAME.into();
-                    self.event_builder.attributes.push(KeyValue::new(
-                        FIELD_EXCEPTION_MESSAGE,
-                        format!("{:?}", value),
-                    ));
+                    self.event_builder
+                        .attributes
+                        .push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, format!("{value:?}")));
                 } else {
                     self.event_builder
                         .attributes
-                        .push(KeyValue::new("error", format!("{:?}", value)));
+                        .push(KeyValue::new("error", format!("{value:?}")));
                 }
             }
             // Skip fields that are actually log metadata that have already been handled
@@ -257,7 +256,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            "message" => self.event_builder.name = format!("{:?}", value).into(),
+            "message" => self.event_builder.name = format!("{value:?}").into(),
             // While tracing supports the error primitive, the instrumentation macro does not
             // use the primitive and instead uses the debug or display primitive.
             // In both cases, an event with an empty name and with an error attribute is created.
@@ -266,18 +265,17 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                     self.span_builder_updates
                         .get_or_insert_with(SpanBuilderUpdates::default)
                         .status
-                        .replace(otel::Status::error(format!("{:?}", value)));
+                        .replace(otel::Status::error(format!("{value:?}")));
                 }
                 if self.sem_conv_config.error_events_to_exceptions {
                     self.event_builder.name = EVENT_EXCEPTION_NAME.into();
-                    self.event_builder.attributes.push(KeyValue::new(
-                        FIELD_EXCEPTION_MESSAGE,
-                        format!("{:?}", value),
-                    ));
+                    self.event_builder
+                        .attributes
+                        .push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, format!("{value:?}")));
                 } else {
                     self.event_builder
                         .attributes
-                        .push(KeyValue::new("error", format!("{:?}", value)));
+                        .push(KeyValue::new("error", format!("{value:?}")));
                 }
             }
             // Skip fields that are actually log metadata that have already been handled
@@ -286,7 +284,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             name => {
                 self.event_builder
                     .attributes
-                    .push(KeyValue::new(name, format!("{:?}", value)));
+                    .push(KeyValue::new(name, format!("{value:?}")));
             }
         }
     }
@@ -442,7 +440,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             SPAN_NAME_FIELD => self.span_builder_updates.name = Some(value.to_string().into()),
             SPAN_KIND_FIELD => self.span_builder_updates.span_kind = str_to_span_kind(value),
             SPAN_STATUS_CODE_FIELD => self.span_builder_updates.status = Some(str_to_status(value)),
-            SPAN_STATUS_MESSAGE_FIELD => {
+            SPAN_STATUS_DESCRIPTION_FIELD => {
                 self.span_builder_updates.status = Some(otel::Status::error(value.to_string()))
             }
             _ => self.record(KeyValue::new(field.name(), value.to_string())),
@@ -455,19 +453,19 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            SPAN_NAME_FIELD => self.span_builder_updates.name = Some(format!("{:?}", value).into()),
+            SPAN_NAME_FIELD => self.span_builder_updates.name = Some(format!("{value:?}").into()),
             SPAN_KIND_FIELD => {
-                self.span_builder_updates.span_kind = str_to_span_kind(&format!("{:?}", value))
+                self.span_builder_updates.span_kind = str_to_span_kind(&format!("{value:?}"))
             }
             SPAN_STATUS_CODE_FIELD => {
-                self.span_builder_updates.status = Some(str_to_status(&format!("{:?}", value)))
+                self.span_builder_updates.status = Some(str_to_status(&format!("{value:?}")))
             }
-            SPAN_STATUS_MESSAGE_FIELD => {
-                self.span_builder_updates.status = Some(otel::Status::error(format!("{:?}", value)))
+            SPAN_STATUS_DESCRIPTION_FIELD => {
+                self.span_builder_updates.status = Some(otel::Status::error(format!("{value:?}")))
             }
             _ => self.record(KeyValue::new(
                 Key::new(field.name()),
-                Value::String(format!("{:?}", value).into()),
+                Value::String(format!("{value:?}").into()),
             )),
         }
     }
@@ -566,6 +564,7 @@ where
             tracked_inactivity: true,
             with_threads: true,
             with_level: false,
+            with_target: true,
             sem_conv_config: SemConvConfig {
                 error_fields_to_exceptions: true,
                 error_records_to_exceptions: true,
@@ -621,6 +620,7 @@ where
             tracked_inactivity: self.tracked_inactivity,
             with_threads: self.with_threads,
             with_level: self.with_level,
+            with_target: self.with_target,
             sem_conv_config: self.sem_conv_config,
             get_context: WithContext(OpenTelemetryLayer::<S, Tracer>::get_context),
             _registry: self._registry,
@@ -765,6 +765,16 @@ where
         }
     }
 
+    /// Sets whether or not span metadata should include an attribute with `target` from `tracing` spans.
+    ///
+    /// By default, the target attribute is enabled..
+    pub fn with_target(self, target: bool) -> Self {
+        Self {
+            with_target: target,
+            ..self
+        }
+    }
+
     /// Retrieve the parent OpenTelemetry [`Context`] from the current tracing
     /// [`span`] through the [`Registry`]. This [`Context`] links spans to their
     /// parent for proper hierarchical visualization.
@@ -843,12 +853,15 @@ where
         if self.with_level {
             extra_attrs += 1;
         }
+        if self.with_target {
+            extra_attrs += 1;
+        }
         extra_attrs
     }
 }
 
 thread_local! {
-    static THREAD_ID: unsync::Lazy<u64> = unsync::Lazy::new(|| {
+    static THREAD_ID: u64 = {
         // OpenTelemetry's semantic conventions require the thread ID to be
         // recorded as an integer, but `std::thread::ThreadId` does not expose
         // the integer value on stable, so we have to convert it to a `usize` by
@@ -857,7 +870,7 @@ thread_local! {
         // TODO(eliza): once `std::thread::ThreadId::as_u64` is stabilized
         // (https://github.com/rust-lang/rust/issues/67939), just use that.
         thread_id_integer(thread::current().id())
-    });
+    };
 }
 
 impl<S, T> Layer<S> for OpenTelemetryLayer<S, T>
@@ -911,7 +924,7 @@ where
         }
 
         if self.with_threads {
-            THREAD_ID.with(|id| builder_attrs.push(KeyValue::new("thread.id", **id as i64)));
+            THREAD_ID.with(|id| builder_attrs.push(KeyValue::new("thread.id", *id as i64)));
             if let Some(name) = std::thread::current().name() {
                 // TODO(eliza): it's a bummer that we have to allocate here, but
                 // we can't easily get the string as a `static`. it would be
@@ -923,6 +936,9 @@ where
 
         if self.with_level {
             builder_attrs.push(KeyValue::new("level", attrs.metadata().level().as_str()));
+        }
+        if self.with_target {
+            builder_attrs.push(KeyValue::new("target", attrs.metadata().target()));
         }
 
         let mut updates = SpanBuilderUpdates::default();
@@ -944,9 +960,12 @@ where
         let mut extensions = span.extensions_mut();
 
         if let Some(timings) = extensions.get_mut::<Timings>() {
-            let now = Instant::now();
-            timings.idle += (now - timings.last).as_nanos() as i64;
-            timings.last = now;
+            if timings.entered_count == 0 {
+                let now = Instant::now();
+                timings.idle += (now - timings.last).as_nanos() as i64;
+                timings.last = now;
+            }
+            timings.entered_count += 1;
         }
     }
 
@@ -963,9 +982,12 @@ where
         }
 
         if let Some(timings) = extensions.get_mut::<Timings>() {
-            let now = Instant::now();
-            timings.busy += (now - timings.last).as_nanos() as i64;
-            timings.last = now;
+            timings.entered_count -= 1;
+            if timings.entered_count == 0 {
+                let now = Instant::now();
+                timings.busy += (now - timings.last).as_nanos() as i64;
+                timings.last = now;
+            }
         }
     }
 
@@ -1192,6 +1214,7 @@ struct Timings {
     idle: i64,
     busy: i64,
     last: Instant,
+    entered_count: u64,
 }
 
 impl Timings {
@@ -1200,12 +1223,13 @@ impl Timings {
             idle: 0,
             busy: 0,
             last: Instant::now(),
+            entered_count: 0,
         }
     }
 }
 
 fn thread_id_integer(id: thread::ThreadId) -> u64 {
-    let thread_id = format!("{:?}", id);
+    let thread_id = format!("{id:?}");
     thread_id
         .trim_start_matches("ThreadId(")
         .trim_end_matches(')')
@@ -1374,14 +1398,14 @@ mod tests {
     }
 
     #[test]
-    fn span_status_message() {
+    fn span_status_description() {
         let tracer = TestTracer(Arc::new(Mutex::new(None)));
         let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
 
         let message = "message";
 
         tracing::subscriber::with_default(subscriber, || {
-            tracing::debug_span!("request", otel.status_message = message);
+            tracing::debug_span!("request", otel.status_description = message);
         });
 
         let recorded_status_message = tracer
@@ -1716,6 +1740,42 @@ mod tests {
             .map(|kv| kv.key.as_str())
             .collect::<Vec<&str>>();
         assert!(!keys.contains(&"level"));
+    }
+
+    #[test]
+    fn includes_target() {
+        let tracer = TestTracer(Arc::new(Mutex::new(None)));
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().with_tracer(tracer.clone()).with_target(true));
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug_span!("request");
+        });
+
+        let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
+        let keys = attributes
+            .iter()
+            .map(|kv| kv.key.as_str())
+            .collect::<Vec<&str>>();
+        assert!(keys.contains(&"target"));
+    }
+
+    #[test]
+    fn excludes_target() {
+        let tracer = TestTracer(Arc::new(Mutex::new(None)));
+        let subscriber = tracing_subscriber::registry()
+            .with(layer().with_tracer(tracer.clone()).with_target(false));
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug_span!("request");
+        });
+
+        let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
+        let keys = attributes
+            .iter()
+            .map(|kv| kv.key.as_str())
+            .collect::<Vec<&str>>();
+        assert!(!keys.contains(&"target"));
     }
 
     #[test]
